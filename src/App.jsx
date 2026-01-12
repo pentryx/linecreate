@@ -482,7 +482,7 @@ export default function ContourDrawer() {
       <div style={s.header}>
         <div style={s.headerTitle}>
           <span>Kontur Çizici</span>
-          <span style={s.headerSubtitle}>v0.1.8 | by Harun Erceylan </span>
+          <span style={s.headerSubtitle}>v0.1.8 | by Ercxxx </span>
         </div>
 
         <div style={s.headerControls}>
@@ -618,3 +618,4 @@ export default function ContourDrawer() {
     </div>
   );
 }
+
