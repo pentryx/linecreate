@@ -5,9 +5,24 @@ const PIXELS_PER_MM = 3.7795275591;
 const mmToPx = (mm) => mm * PIXELS_PER_MM;
 
 export class Exporter {
+  static getExportPaths(engine) {
+    // Always recompute contours before export for maximum quality
+    if (engine && typeof engine.computeContours === 'function') {
+      engine.computeContours();
+    }
+
+    const renderData = engine.getRenderData();
+    const { innerPath, outerPath, contours } = renderData;
+    const layers = contours.length > 0 ? contours : [];
+    return {
+      renderData,
+      allPaths: [innerPath, ...layers, outerPath]
+    };
+  }
+
   static export(type, engine) {
     console.log(`Exporter.export called with type: ${type}`);
-    const renderData = engine.getRenderData();
+    const { renderData, allPaths } = Exporter.getExportPaths(engine);
     const { innerPath, outerPath, contours } = renderData;
 
     console.log(`Paths - Inner: ${innerPath.length}, Outer: ${outerPath.length}, Contours: ${contours.length}`);
@@ -26,11 +41,6 @@ export class Exporter {
       return;
     }
 
-    // For high-res export, use existing contours from engine
-    // They are already computed with adaptive smoothing
-    const layers = contours.length > 0 ? contours : [];
-    const allPaths = [innerPath, outerPath, ...layers];
-
     console.log(`Total paths to export: ${allPaths.length}`);
 
     const bounds = Exporter.calculateBounds(allPaths);
@@ -42,9 +52,11 @@ export class Exporter {
     // Create filename with dimensions
     const fileName = `${userFileName.trim()}_${Math.round(widthMM)}mm_${Math.round(heightMM)}mm`;
 
+    const layerMode = 'separate';
+
     if (type === 'DXF') {
       console.log('Calling exportDXF...');
-      Exporter.exportDXF(allPaths, bounds, fileName);
+      Exporter.exportDXF(allPaths, bounds, fileName, layerMode);
     } else if (type === 'PDF') {
       console.log('Calling exportPDF...');
       Exporter.exportPDF(allPaths, bounds, widthMM, heightMM, fileName);
@@ -53,7 +65,7 @@ export class Exporter {
       Exporter.exportSVG(allPaths, bounds, widthMM, heightMM, fileName);
     } else if (type === 'DWG') {
       console.log('Calling exportDWG...');
-      Exporter.exportDWG(allPaths, bounds, fileName);
+      Exporter.exportDWG(allPaths, bounds, fileName, layerMode);
     }
     console.log(`Export ${type} completed`);
   }
@@ -78,7 +90,7 @@ export class Exporter {
     };
   }
 
-  static exportDXF(allPaths, bounds, fileName) {
+  static exportDXF(allPaths, bounds, fileName, layerMode = 'separate') {
     // DXF R12 format with precise 1:1 mm scale
     let dxf = '0\nSECTION\n2\nHEADER\n';
     dxf += '9\n$INSUNITS\n70\n4\n'; // Units: millimeters
@@ -86,10 +98,16 @@ export class Exporter {
     dxf += '0\nENDSEC\n';
     dxf += '0\nSECTION\n2\nENTITIES\n';
 
-    allPaths.forEach(path => {
+    const getLayerName = (idx) => {
+      if (layerMode === 'grouped') return 'LAYER';
+      const n = String(idx + 1).padStart(2, '0');
+      return `Layer${n}`;
+    };
+
+    allPaths.forEach((path, idx) => {
       if (path.length < 2) return;
       dxf += '0\nLWPOLYLINE\n';
-      dxf += '8\n0\n'; // Layer 0
+      dxf += '8\n' + getLayerName(idx) + '\n';
       dxf += '62\n7\n'; // Color: black/white (AutoCAD color 7)
       dxf += '90\n' + path.length + '\n'; // Number of vertices
       dxf += '70\n1\n'; // Closed polyline
@@ -112,7 +130,7 @@ export class Exporter {
     link.click();
   }
 
-  static exportDWG(allPaths, bounds, fileName) {
+  static exportDWG(allPaths, bounds, fileName, layerMode = 'separate') {
     // DWG format is binary and complex. For simplicity, we export as DXF with .dwg extension
     // Most CAD software can import DXF files even with .dwg extension
     // For true DWG, you'd need a library like dwg.js or server-side conversion
@@ -123,10 +141,16 @@ export class Exporter {
     dxf += '0\nENDSEC\n';
     dxf += '0\nSECTION\n2\nENTITIES\n';
 
-    allPaths.forEach(path => {
+    const getLayerName = (idx) => {
+      if (layerMode === 'grouped') return 'LAYER';
+      const n = String(idx + 1).padStart(2, '0');
+      return `Layer${n}`;
+    };
+
+    allPaths.forEach((path, idx) => {
       if (path.length < 2) return;
       dxf += '0\nLWPOLYLINE\n';
-      dxf += '8\n0\n'; // Layer 0
+      dxf += '8\n' + getLayerName(idx) + '\n';
       dxf += '62\n7\n'; // Color: black/white (AutoCAD color 7)
       dxf += '90\n' + path.length + '\n';
       dxf += '70\n1\n'; // Closed
@@ -194,7 +218,7 @@ export class Exporter {
         const p = path[i];
         const x = (p.x - bounds.minX) / PIXELS_PER_MM;
         const y = (p.y - bounds.minY) / PIXELS_PER_MM;
-        d += (i === 0 ? 'M' : 'L') + x.toFixed(4) + ' ' + y.toFixed(4) + ' ';
+        d += (i === 0 ? 'M' : 'L') + x.toFixed(6) + ' ' + y.toFixed(6) + ' ';
       }
       return d + 'Z';
     };
@@ -206,7 +230,7 @@ export class Exporter {
 
     const svg = [
       '<?xml version="1.0" encoding="UTF-8"?>',
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${widthMM.toFixed(2)}mm" height="${heightMM.toFixed(2)}mm" viewBox="0 0 ${widthMM.toFixed(4)} ${heightMM.toFixed(4)}">`,
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${widthMM.toFixed(4)}mm" height="${heightMM.toFixed(4)}mm" viewBox="0 0 ${widthMM.toFixed(6)} ${heightMM.toFixed(6)}">`,
       paths,
       '</svg>'
     ].join('\n');
